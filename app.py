@@ -43,7 +43,7 @@ def fetch_threads_via_apify(keyword, token):
         "maxItems": 10, 
         "sortByRecent": False
     }
-    }
+    
     
     try:
         run = client.actor(actor_id).call(run_input=run_input)
