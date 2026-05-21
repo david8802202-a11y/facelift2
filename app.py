@@ -20,9 +20,10 @@ keywords = {
     "閒聊": ["容貌焦慮", "保養", "猶豫", "痛感"]
 }
 
-# 抓取 Dcard 醫美板熱門文章的函式
-def fetch_dcard_posts():
-    url = "https://www.dcard.tw/service/api/v2/forums/facelift/posts?popular=true&limit=50"
+# 改寫：針對特定關鍵字進行搜尋的函式
+def fetch_dcard_search(query):
+    # 使用 Dcard 搜尋 API，直接找醫美板、符合關鍵字的文章，並抓取 30 筆
+    url = f"https://www.dcard.tw/service/api/v2/search/posts?query={query}&forum=facelift&limit=30"
     headers = {'User-Agent': 'Mozilla/5.0'}
     try:
         response = requests.get(url, headers=headers)
@@ -37,40 +38,33 @@ if st.button("開始抓取與改寫"):
     if not api_key:
         st.error("請先在左側輸入你的 Gemini API Key！")
     else:
-        # 初始化 Gemini API
         genai.configure(api_key=api_key)
-        # 使用 1.5 Flash 模型，速度快且免費額度高
         model = genai.GenerativeModel('gemini-1.5-flash')
         
-        with st.spinner('正在從 Dcard 抓取最新熱門文章...'):
-            posts = fetch_dcard_posts()
+        # 拿該類別的第一個關鍵字（例如針劑的"玻尿酸"）當作主要搜尋詞
+        search_term = keywords[category][0] 
+        
+        with st.spinner(f'正在 Dcard 搜尋「{search_term}」相關的文章...'):
+            posts = fetch_dcard_search(search_term)
             
-            # 依照選擇的類別進行篩選
-            target_kw = keywords[category]
-            filtered_posts = []
-            for p in posts:
-                title_text = p.get('title', '')
-                excerpt_text = p.get('excerpt', '')
-                if any(kw in title_text or kw in excerpt_text for kw in target_kw):
-                    filtered_posts.append(p)
+            # 過濾出真的有內容，且按讚數或留言數大於 5 的文章，確保具有討論度
+            filtered_posts = [p for p in posts if p.get('likeCount', 0) > 5 or p.get('commentCount', 0) > 5]
             
             if not filtered_posts:
-                st.warning(f"目前熱門文章中，沒有找到符合「{category}」標籤的內容。")
+                st.warning(f"近期沒有找到討論度足夠的「{category}」相關文章。")
             else:
-                st.success(f"成功篩選出 {len(filtered_posts)} 篇相關文章！(此處先取最熱門的 1 篇進行示範)")
+                st.success(f"成功搜出 {len(filtered_posts)} 篇有討論度的文章！(取最熱門示範)")
                 
-                # 取討論度最高的第一篇
-                top_post = filtered_posts[0]
+                # 依照愛心數重新排序，強制取最高的一篇
+                top_post = sorted(filtered_posts, key=lambda x: x.get('likeCount', 0), reverse=True)[0]
                 title = top_post['title']
                 excerpt = top_post['excerpt']
                 url = f"https://www.dcard.tw/f/facelift/p/{top_post['id']}"
                 
-                # 顯示原始文章
                 st.subheader("原始文章 (Dcard)")
                 st.write(f"**標題：** [{title}]({url})")
                 st.write(f"**內文摘要：** {excerpt}")
                 
-                # 準備發送給 AI 的 Prompt
                 st.subheader("PTT 風格轉換結果")
                 prompt = f"""
                 你是一位熟悉台灣 PTT 論壇生態的資深鄉民。請將以下這篇 Dcard 的醫美文章，重新改寫成 PTT (例如 facelift 板) 的發文風格。
@@ -79,11 +73,11 @@ if st.button("開始抓取與改寫"):
                 【原始內容】：{excerpt}
                 
                 【絕對要遵守的改寫規則】：
-                1. 絕對不要在文章開頭或是任何地方提到「年份開頭」（例如 2026年）。
+                1. 絕對不要在文章開頭或是任何地方提到「年份開頭」。
                 2. 標題必須加上 PTT 的分類標籤（例如 [問題]、[心得]、[討論]）。
-                3. 嚴格控制視覺排版：PTT 鄉民不喜歡密集的文字方塊。請確保「強制斷行」，每句話不要太長，段落與段落之間必須有空白行。
-                4. 語氣轉換：將 Dcard 習慣用語轉為 PTT 用語（例如：原PO、各位大大、小妹等），並清除所有 Emoji 表情符號。
-                5. 模擬回文：在文章最下方，請根據內文自動生成 5 條符合 PTT 格式的模擬推文反應（必須正確使用「推」、「噓」、「→」）。
+                3. 嚴格控制視覺排版：強制斷行，每句話不要太長，段落與段落之間必須有空白行。
+                4. 語氣轉換：轉為 PTT 用語（例如：原PO、大大等），並清除 Emoji。
+                5. 模擬回文：在文章最下方生成 5 條模擬推文反應（需正確使用「推」、「噓」、「→」）。
                 """
                 
                 with st.spinner('Gemini 正在將內容轉譯為 PTT 生態用語...'):
@@ -91,4 +85,5 @@ if st.button("開始抓取與改寫"):
                         response = model.generate_content(prompt)
                         st.markdown(response.text)
                     except Exception as e:
-                        st.error(f"AI 生成失敗，請確認 API Key 是否正確或額度是否達上限。錯誤訊息：{e}")
+                        st.error(f"AI 生成失敗：{e}")
+
