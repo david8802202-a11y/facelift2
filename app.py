@@ -39,9 +39,10 @@ def fetch_threads_via_apify(keyword, token):
     
     # 傳遞參數：這裡對應截圖中的輸入欄位
     run_input = {
-        "searchKeywords": [keyword],
-        "maxItems": 10, # 每次只抓前 10 筆節省運算成本
+        "keywords": [keyword],
+        "maxItems": 10, 
         "sortByRecent": False
+    }
     }
     
     try:
