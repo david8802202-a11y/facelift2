@@ -1,6 +1,57 @@
-import random  # 記得在最上方或這個區塊前確保有 import random
+import streamlit as st
+import google.generativeai as genai
+from apify_client import ApifyClient
+import random
 
-# 執行區塊
+# 1. 網頁標題設定
+st.set_page_config(page_title="Threads 醫美素材 PTT 改寫器", layout="wide")
+st.title("Threads 自動搜尋與 PTT 風格改寫器")
+
+# 2. 側邊欄設定區（支援自動記憶金鑰）
+st.sidebar.header("操作設定")
+
+default_gemini = ""
+default_apify = ""
+
+try:
+    default_gemini = st.secrets["GEMINI_API_KEY"]
+    default_apify = st.secrets["APIFY_TOKEN"]
+except Exception:
+    pass
+
+gemini_api_key = st.sidebar.text_input("輸入 Gemini API Key", value=default_gemini, type="password")
+apify_token = st.sidebar.text_input("輸入 Apify API Token", value=default_apify, type="password")
+category = st.sidebar.selectbox("篩選類別", ["電波", "針劑", "診所", "閒聊"])
+
+# 3. 醫美關鍵字庫
+keywords = {
+    "電波": ["鳳凰電波", "玩美電波", "海芙音波", "索夫波"],
+    "針劑": ["玻尿酸", "肉毒", "精靈針", "洢蓮絲"],
+    "診所": ["醫美診所推薦", "醫美避雷", "醫美諮詢"],
+    "閒聊": ["容貌焦慮", "醫美保養", "術後恢復"]
+}
+
+# 4. 呼叫 Apify 爬蟲函式
+def fetch_threads_via_apify(keyword, token):
+    client = ApifyClient(token)
+    actor_id = "watcher.data/search-threads-by-keywords"
+    
+    run_input = {
+        "keywords": [keyword],
+        "maxItems": 10,
+        "sortByRecent": False
+    }
+    
+    try:
+        run = client.actor(actor_id).call(run_input=run_input)
+        dataset_id = run.get("defaultDatasetId") if isinstance(run, dict) else run.default_dataset_id
+        items = list(client.dataset(dataset_id).iterate_items())
+        return items
+    except Exception as e:
+        st.error(f"Apify 爬蟲執行失敗: {e}")
+        return []
+
+# 5. 主要執行區塊
 if st.button("開始自動搜尋與改寫"):
     if not gemini_api_key or not apify_token:
         st.error("請確認左側的 Gemini API Key 與 Apify Token 皆已填寫！")
@@ -18,15 +69,14 @@ if st.button("開始自動搜尋與改寫"):
             else:
                 st.success(f"成功抓回 {len(posts)} 篇貼文！(已從前 10 篇熱門討論中隨機挑選一篇改寫，避免內容重複)")
                 
-                # 【優化：解決 BUG】不再死板取第 1 名，改從熱門池中隨機挑選 1 篇
+                # 隨機挑選一篇避免每天重複
                 top_post = random.choice(posts)
-                
                 content = top_post.get('text', top_post.get('caption', '無文字內容'))
                 
-                # 【優化：解決報錯】超安全取作者欄位邏輯，層層防護
+                # 安全獲取作者欄位
                 author_data = top_post.get('author')
                 if isinstance(author_data, dict):
-                    author = author_data.get('username', author_data.get('username', '未知作者'))
+                    author = author_data.get('username', '未知作者')
                 elif isinstance(author_data, str):
                     author = author_data
                 else:
