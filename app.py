@@ -3,8 +3,8 @@ import google.generativeai as genai
 from apify_client import ApifyClient
 
 # 1. 網頁標題與排版設定
-st.set_page_config(page_title="Threads 醫美素材自選改寫器", layout="wide")
-st.title("Threads 醫美素材自選與 PTT 風格改寫器")
+st.set_page_config(page_title="Threads 醫美素材精準改寫器", layout="wide")
+st.title("Threads 醫美素材自選與 PTT 鄉民風格改寫器")
 
 # 2. 側邊欄設定區（支援自動記憶金鑰）
 st.sidebar.header("操作設定")
@@ -37,7 +37,7 @@ def fetch_threads_via_apify(keyword, token):
     
     run_input = {
         "keywords": [keyword],
-        "maxItems": 15,  # 多抓幾篇讓選擇更多
+        "maxItems": 15,
         "sortByRecent": False
     }
     
@@ -50,7 +50,7 @@ def fetch_threads_via_apify(keyword, token):
         st.error(f"Apify 爬蟲執行失敗: {e}")
         return []
 
-# 5. 初始化 Session State 來記憶抓到的文章，避免網頁重新整理時消失
+# 5. 初始化 Session State 記憶資料
 if "fetched_posts" not in st.session_state:
     st.session_state.fetched_posts = []
 if "current_keyword" not in st.session_state:
@@ -58,7 +58,7 @@ if "current_keyword" not in st.session_state:
 
 search_term = keywords[category][0]
 
-# 按鈕一：先搜尋熱門清單
+# 按鈕一：搜尋熱門清單
 if st.button(f"🔎 搜尋「{search_term}」熱門文章"):
     if not apify_token:
         st.error("請先在左側輸入你的 Apify Token！")
@@ -67,11 +67,10 @@ if st.button(f"🔎 搜尋「{search_term}」熱門文章"):
             st.session_state.fetched_posts = fetch_threads_via_apify(search_term, apify_token)
             st.session_state.current_keyword = search_term
 
-# 6. 如果有抓到資料，顯示清單供使用者挑選
+# 6. 顯示自選清單與 AI 精準改寫
 if st.session_state.fetched_posts:
-    st.success(f"成功撈回 {len(st.session_state.fetched_posts)} 篇相關文章！請在下方挑選你覺得適合的素材：")
+    st.success(f"成功撈回 {len(st.session_state.fetched_posts)} 篇相關文章！請挑選素材：")
     
-    # 建立選單顯示的文字（作者 + 內文前 30 字摘要）
     options = []
     for p in st.session_state.fetched_posts:
         author_data = p.get('author')
@@ -79,7 +78,6 @@ if st.session_state.fetched_posts:
         text = p.get('text', p.get('caption', '無內文')).replace('\n', ' ')[:30]
         options.append(f"👤 @{author} | 📝 {text}...")
         
-    # 讓使用者人肉篩選真正有行銷價值的貼文
     selected_index = st.selectbox("🎯 請選擇你想改寫的文章：", range(len(options)), format_func=lambda x: options[x])
     
     chosen_post = st.session_state.fetched_posts[selected_index]
@@ -88,32 +86,23 @@ if st.session_state.fetched_posts:
     
     st.info(f"**💡 你已選定素材：** {content}")
     
-    # 按鈕二：針對選定的文章進行 AI 改寫
+    # 按鈕二：四大情境與真實推文格式改寫
     if st.button("🔥 開始將所選文章改寫為 PTT 格式"):
         if not gemini_api_key:
             st.error("請填寫 Gemini API Key！")
         else:
-            # 修正 404 Bug：明確指定最新的 gemini-2.5-flash 模型名稱
             genai.configure(api_key=gemini_api_key)
             model = genai.GenerativeModel('gemini-2.5-flash')
             
             st.subheader("PTT 風格轉換結果")
+            
             prompt = f"""
-            你是一位熟悉台灣 PTT 論壇生態的資深鄉民。請將以下這篇來自 Threads 的醫美短文，重新改寫成 PTT (例如 facelift 板) 的發文風格。
+            你是一位精通台灣 PTT 論壇（如 facelift、BeautySalon 板）文化與口碑操作的頂尖操盤手。
+            請根據以下提供的 Threads 原始內容，先判斷其屬於哪一種「情境分類」，並嚴格模仿該分類的 PTT 真人發文與回文精髓進行重寫。
             
-            【原始內容】：{content}
+            【Threads 原始內容】：
+            {content}
             
-            【絕對要遵守的改寫規則】：
-            1. 絕對不要在文章開頭或是任何地方提到「年份開頭」。
-            2. 標題必須加上 PTT 的分類標籤（例如 [問題]、[心得]、[討論]）。
-            3. 嚴格控制視覺排版：強制斷行，每句話不要太長，段落與段落之間必須有空白行。
-            4. 語氣轉換：轉為 PTT 用語（例如：原PO、大大、小妹等），並清除所有 Emoji 表情符號。
-            5. 模擬回文：在文章最下方生成 5 條模擬推文反應（需正確使用「推」、「噓」、「→」）。
-            """
-            
-            with st.spinner('Gemini 正在為你客製化轉譯為 PTT 生態用語...'):
-                try:
-                    response = model.generate_content(prompt)
-                    st.markdown(response.text)
-                except Exception as e:
-                    st.error(f"AI 生成失敗：{e}")
+            【行銷操盤手必須死守的 PTT 真人寫作規範】：
+            1. 視覺高碎裂感（最重要）：每句話絕對不能過長（大約 15 個字內），只要講完一個短句就必須「強制斷行」。段落與段落之間必須留下一條完整的「空白行」。禁止出現任何長篇大論的文字方塊！
+            2.
