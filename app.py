@@ -34,20 +34,23 @@ keywords = {
 # 呼叫 Apify 的函式
 def fetch_threads_via_apify(keyword, token):
     client = ApifyClient(token)
-    # 使用你指定的 Actor ID
     actor_id = "watcher.data/search-threads-by-keywords"
     
-    # 傳遞參數：這裡對應截圖中的輸入欄位
     run_input = {
         "keywords": [keyword],
-        "maxItems": 10, 
+        "maxItems": 10,
         "sortByRecent": False
     }
     
-    
     try:
+        # 執行爬蟲
         run = client.actor(actor_id).call(run_input=run_input)
-        items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+        
+        # 修正取值邏輯：改用 get() 或是直接讀取屬性，相容新版 SDK
+        dataset_id = run.get("defaultDatasetId") if isinstance(run, dict) else run.default_dataset_id
+        
+        # 撈取資料集內容
+        items = list(client.dataset(dataset_id).iterate_items())
         return items
     except Exception as e:
         st.error(f"Apify 爬蟲執行失敗: {e}")
