@@ -1,82 +1,96 @@
 import streamlit as st
-import requests
 import google.generativeai as genai
+from apify_client import ApifyClient
 
-# 設定網頁標題
-st.set_page_config(page_title="醫美口碑素材改寫器", layout="wide")
-st.title("醫美輿情搜集與 PTT 風格改寫器")
+st.set_page_config(page_title="Threads 醫美素材 PTT 改寫器", layout="wide")
+st.title("Threads 自動搜尋與 PTT 風格改寫器")
 
-# 側邊欄：設定與篩選
+# 側邊欄設定區
 st.sidebar.header("操作設定")
-api_key = st.sidebar.text_input("輸入 Gemini API Key", type="password")
-platform = st.sidebar.selectbox("來源平台", ["Dcard (醫美板)"]) # 第一版先實作 Dcard
+
+# 建立一個安全讀取機制，避免本地端測試時找不到 Secrets 而報錯
+default_gemini = ""
+default_apify = ""
+
+try:
+    default_gemini = st.secrets["GEMINI_API_KEY"]
+    default_apify = st.secrets["APIFY_TOKEN"]
+except Exception:
+    pass # 如果保險箱裡沒東西，就維持空字串
+
+# 將保險箱拿到的金鑰設為預設值 (value)
+gemini_api_key = st.sidebar.text_input("輸入 Gemini API Key", value=default_gemini, type="password")
+apify_token = st.sidebar.text_input("輸入 Apify API Token", value=default_apify, type="password")
 category = st.sidebar.selectbox("篩選類別", ["電波", "針劑", "診所", "閒聊"])
 
-# 建立分類關鍵字庫
+# 醫美關鍵字庫 (取第一個字作為搜尋關鍵字)
 keywords = {
-    "電波": ["電波", "鳳凰", "玩美", "海芙", "索夫波", "探頭", "發數"],
-    "針劑": ["玻尿酸", "肉毒", "精靈針", "洢蓮絲", "消脂針", "補山根"],
-    "診所": ["推薦", "避雷", "諮詢", "醫生", "報價", "踩雷"],
-    "閒聊": ["容貌焦慮", "保養", "猶豫", "痛感"]
+    "電波": ["鳳凰電波", "玩美電波", "海芙音波", "索夫波"],
+    "針劑": ["玻尿酸", "肉毒", "精靈針", "洢蓮絲"],
+    "診所": ["醫美診所推薦", "醫美避雷", "醫美諮詢"],
+    "閒聊": ["容貌焦慮", "醫美保養", "術後恢復"]
 }
 
-# 改寫：針對特定關鍵字進行搜尋的函式
-def fetch_dcard_search(query):
-    # 使用 Dcard 搜尋 API，直接找醫美板、符合關鍵字的文章，並抓取 30 筆
-    url = f"https://www.dcard.tw/service/api/v2/search/posts?query={query}&forum=facelift&limit=30"
-    headers = {'User-Agent': 'Mozilla/5.0'}
+# 呼叫 Apify 的函式
+def fetch_threads_via_apify(keyword, token):
+    client = ApifyClient(token)
+    # 使用你指定的 Actor ID
+    actor_id = "watcher.data/search-threads-by-keywords"
+    
+    # 傳遞參數：這裡對應截圖中的輸入欄位
+    run_input = {
+        "searchKeywords": [keyword],
+        "maxItems": 10, # 每次只抓前 10 筆節省運算成本
+        "sortByRecent": False
+    }
+    
     try:
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            return response.json()
+        run = client.actor(actor_id).call(run_input=run_input)
+        items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+        return items
     except Exception as e:
-        st.error(f"抓取失敗: {e}")
-    return []
+        st.error(f"Apify 爬蟲執行失敗: {e}")
+        return []
 
-# 主要執行區塊
-if st.button("開始抓取與改寫"):
-    if not api_key:
-        st.error("請先在左側輸入你的 Gemini API Key！")
+# 執行區塊
+if st.button("開始自動搜尋與改寫"):
+    if not gemini_api_key or not apify_token:
+        st.error("請確認左側的 Gemini API Key 與 Apify Token 皆已填寫！")
     else:
-        genai.configure(api_key=api_key)
+        genai.configure(api_key=gemini_api_key)
         model = genai.GenerativeModel('gemini-1.5-flash')
         
-        # 拿該類別的第一個關鍵字（例如針劑的"玻尿酸"）當作主要搜尋詞
-        search_term = keywords[category][0] 
+        search_term = keywords[category][0]
         
-        with st.spinner(f'正在 Dcard 搜尋「{search_term}」相關的文章...'):
-            posts = fetch_dcard_search(search_term)
+        with st.spinner(f'正在驅動 Apify 爬蟲前往 Threads 搜尋「{search_term}」...'):
+            posts = fetch_threads_via_apify(search_term, apify_token)
             
-            # 過濾出真的有內容，且按讚數或留言數大於 5 的文章，確保具有討論度
-            filtered_posts = [p for p in posts if p.get('likeCount', 0) > 5 or p.get('commentCount', 0) > 5]
-            
-            if not filtered_posts:
-                st.warning(f"近期沒有找到討論度足夠的「{category}」相關文章。")
+            if not posts:
+                st.warning(f"目前沒有找到「{search_term}」相關的熱門 Threads 貼文。")
             else:
-                st.success(f"成功搜出 {len(filtered_posts)} 篇有討論度的文章！(取最熱門示範)")
+                st.success(f"成功抓回 {len(posts)} 篇貼文！(自動取按讚數最高的一篇進行改寫)")
                 
-                # 依照愛心數重新排序，強制取最高的一篇
-                top_post = sorted(filtered_posts, key=lambda x: x.get('likeCount', 0), reverse=True)[0]
-                title = top_post['title']
-                excerpt = top_post['excerpt']
-                url = f"https://www.dcard.tw/f/facelift/p/{top_post['id']}"
+                # 依照按讚數 (likeCount) 排序，找出最熱門的文章
+                top_post = sorted(posts, key=lambda x: x.get('likeCount', 0), reverse=True)[0]
+                content = top_post.get('text', '無文字內容')
+                author = top_post.get('author', {}).get('username', '未知作者')
+                url = top_post.get('url', '')
                 
-                st.subheader("原始文章 (Dcard)")
-                st.write(f"**標題：** [{title}]({url})")
-                st.write(f"**內文摘要：** {excerpt}")
+                st.subheader("原始文章 (Threads)")
+                st.write(f"**作者：** @{author} | **連結：** [點此前往 Threads]({url})")
+                st.write(f"**內文：** {content}")
                 
                 st.subheader("PTT 風格轉換結果")
                 prompt = f"""
-                你是一位熟悉台灣 PTT 論壇生態的資深鄉民。請將以下這篇 Dcard 的醫美文章，重新改寫成 PTT (例如 facelift 板) 的發文風格。
+                你是一位熟悉台灣 PTT 論壇生態的資深鄉民。請將以下這篇來自 Threads 的醫美短文，重新改寫成 PTT (例如 facelift 板) 的發文風格。
                 
-                【原始標題】：{title}
-                【原始內容】：{excerpt}
+                【原始內容】：{content}
                 
                 【絕對要遵守的改寫規則】：
                 1. 絕對不要在文章開頭或是任何地方提到「年份開頭」。
                 2. 標題必須加上 PTT 的分類標籤（例如 [問題]、[心得]、[討論]）。
                 3. 嚴格控制視覺排版：強制斷行，每句話不要太長，段落與段落之間必須有空白行。
-                4. 語氣轉換：轉為 PTT 用語（例如：原PO、大大等），並清除 Emoji。
+                4. 語氣轉換：轉為 PTT 用語（例如：原PO、大大等），並清除 Threads 常見的過多 Emoji。
                 5. 模擬回文：在文章最下方生成 5 條模擬推文反應（需正確使用「推」、「噓」、「→」）。
                 """
                 
@@ -86,4 +100,3 @@ if st.button("開始抓取與改寫"):
                         st.markdown(response.text)
                     except Exception as e:
                         st.error(f"AI 生成失敗：{e}")
-
