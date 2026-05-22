@@ -7,7 +7,7 @@ import random
 st.set_page_config(page_title="Threads 醫美素材精準改寫器", layout="wide")
 st.title("Threads 醫美素材自選與 PTT 鄉民風格改寫器")
 
-# 2. 側邊欄設定區（支援自動記憶金鑰）
+# 2. 側邊欄設定區（支援自動記憶金鑰與額度顯示）
 st.sidebar.header("操作設定")
 
 default_gemini = ""
@@ -21,17 +21,30 @@ except Exception:
 
 gemini_api_key = st.sidebar.text_input("輸入 Gemini API Key", value=default_gemini, type="password")
 apify_token = st.sidebar.text_input("輸入 Apify API Token", value=default_apify, type="password")
+
+# 顯示 Apify 當月額度使用狀況
+if apify_token:
+    try:
+        client = ApifyClient(apify_token)
+        account_info = client.account().get()
+        # 抓取當月剩餘額度 (美金)
+        current_month_usage = account_info.get("currentMonthUsageUsd", 0)
+        # 免費帳號通常是 5 美金上限
+        st.sidebar.metric(label="本月已用 Apify 額度", value=f"${current_month_usage:.3f} / $5.000")
+    except Exception:
+        st.sidebar.warning("無法取得 Apify 額度資訊，請檢查 Token 是否正確。")
+
 category = st.sidebar.selectbox("篩選類別", ["電波", "針劑", "診所", "閒聊"])
 
-# 3. 豐富的醫美關鍵字庫（優化：改為多療程隨機挑選機制）
+# 3. 更新後的醫美關鍵字庫
 keywords_pool = {
-    "電波": ["音波","電波"],
-    "針劑": ["玻尿酸", "肉毒", "精靈針", "洢蓮絲", "鼻基底玻尿酸","逆時針"],
-    "診所": ["醫美診所推薦", "醫美避雷", "醫美諮詢", "台北醫美推薦","高雄醫美推薦","台中醫美推薦"],
+    "電波": ["音波", "電波"],
+    "針劑": ["玻尿酸", "肉毒", "精靈針", "洢蓮絲", "鼻基底玻尿酸", "逆時針"],
+    "診所": ["醫美診所推薦", "醫美避雷", "醫美諮詢", "台北醫美推薦", "高雄醫美推薦", "台中醫美推薦"],
     "閒聊": ["醫美", "醫美保養", "術後恢復", "醫美+術後"]
 }
 
-# 4. 呼看 Apify 爬蟲函式
+# 4. 呼叫 Apify 爬蟲函式
 def fetch_threads_via_apify(keyword, token):
     client = ApifyClient(token)
     actor_id = "watcher.data/search-threads-by-keywords"
@@ -57,24 +70,44 @@ if "fetched_posts" not in st.session_state:
 if "current_keyword" not in st.session_state:
     st.session_state.current_keyword = ""
 
-# 【優化】每次執行時，從字庫中隨機抽樣一個療程或主題作為本次搜尋詞
-if st.button("🔎 隨機挑選療程並搜尋 Threads"):
-    if not apify_token:
-        st.error("請先在左側輸入你的 Apify Token！")
-    else:
-        # 隨機選擇該類別下的一個特定療程
-        search_term = random.choice(keywords_pool[category])
-        st.session_state.current_keyword = search_term
-        
-        with st.spinner(f'正在隨機選定主題「{search_term}」並前往 Threads 撈取讨论池...'):
-            st.session_state.fetched_posts = fetch_threads_via_apify(search_term, apify_token)
+# 6. 搜尋與自訂話題核心區
+st.write("---")
+st.subheader("第一步：獲取 Threads 素材來源")
 
-# 顯示當前鎖定的隨機關鍵字
+col1, col2 = st.columns(2)
+
+with col1:
+    st.markdown("**模式 A：從字庫隨機搜熱門**")
+    if st.button("🎲 隨機挑選療程並搜尋 Threads"):
+        if not apify_token:
+            st.error("請先在左側輸入你的 Apify Token！")
+        else:
+            search_term = random.choice(keywords_pool[category])
+            st.session_state.current_keyword = search_term
+            with st.spinner(f'正在搜尋庫存關鍵字「{search_term}」...'):
+                st.session_state.fetched_posts = fetch_threads_via_apify(search_term, apify_token)
+
+with col2:
+    st.markdown("**模式 B：自訂話題精準搜尋**")
+    custom_input = st.text_input("想搜什麼？直接輸入（例如：皮秒、消脂針、雙眼皮失敗）：", key="custom_term")
+    if st.button("🎯 用自訂話題搜尋 Threads"):
+        if not apify_token:
+            st.error("請先在左側輸入你的 Apify Token！")
+        elif not custom_input:
+            st.warning("請先輸入你想自訂的話題關鍵字！")
+        else:
+            st.session_state.current_keyword = custom_input
+            with st.spinner(f'正在精準搜尋自訂話題「{custom_input}」...'):
+                st.session_state.fetched_posts = fetch_threads_via_apify(custom_input, apify_token)
+
+# 顯示當前鎖定的搜尋字詞
 if st.session_state.current_keyword:
-    st.info(f"當前搜尋主題：**{st.session_state.current_keyword}**")
+    st.info(f"當前鎖定主題：**{st.session_state.current_keyword}**")
 
-# 6. 顯示自選清單與 AI 精準改寫
+# 7. 顯示自選清單與 AI 精準改寫
 if st.session_state.fetched_posts:
+    st.write("---")
+    st.subheader("第二步：挑選素材與 AI 口碑轉化")
     st.success(f"成功撈回 {len(st.session_state.fetched_posts)} 篇相關文章！請挑選素材：")
     
     options = []
@@ -92,7 +125,7 @@ if st.session_state.fetched_posts:
     
     st.info(f"**💡 你已選定素材：** {content}")
     
-    # 按鈕二：四大情境與真實推文格式改寫
+    # 按鈕：四大情境與真實推文格式改寫
     if st.button("🔥 開始將所選文章改寫為 PTT 格式"):
         if not gemini_api_key:
             st.error("請填寫 Gemini API Key！")
