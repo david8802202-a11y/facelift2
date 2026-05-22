@@ -1,28 +1,28 @@
 import streamlit as st
 import google.generativeai as genai
 from apify_client import ApifyClient
-import random
 
 # 1. 網頁標題與排版設定
 st.set_page_config(page_title="Threads 醫美素材精準改寫器", layout="wide")
 st.title("Threads 醫美素材自選與 PTT 鄉民風格改寫器")
 
-# 2. 側邊欄設定區（支援自動記憶金鑰與安全額度顯示）
+# 2. 側邊欄設定區（安全讀取 Secrets 變數）
 st.sidebar.header("操作設定")
 
+# 預設值為空字串
 default_gemini = ""
 default_apify = ""
 
-try:
+# 【超強防呆】嘗試讀取 Secrets，如果失敗就略過，絕對不讓網頁崩潰
+if "GEMINI_API_KEY" in st.secrets:
     default_gemini = st.secrets["GEMINI_API_KEY"]
+if "APIFY_TOKEN" in st.secrets:
     default_apify = st.secrets["APIFY_TOKEN"]
-except Exception:
-    pass
 
 gemini_api_key = st.sidebar.text_input("輸入 Gemini API Key", value=default_gemini, type="password")
 apify_token = st.sidebar.text_input("輸入 Apify API Token", value=default_apify, type="password")
 
-# 【優化】安全抓取額度：如果權限不夠或失敗，直接略過，不跳錯誤擋路
+# 安全抓取 Apify 餘額
 if apify_token:
     try:
         client = ApifyClient(apify_token)
@@ -31,7 +31,7 @@ if apify_token:
             current_month_usage = account_info["currentMonthUsageUsd"]
             st.sidebar.metric(label="本月已用 Apify 額度", value=f"${current_month_usage:.3f} / $5.000")
     except Exception:
-        pass # 抓不到就安靜略過
+        pass
 
 category = st.sidebar.selectbox("篩選類別", ["電波", "針劑", "診所", "閒聊"])
 
@@ -81,6 +81,7 @@ with col1:
         if not apify_token:
             st.error("請先在左側輸入你的 Apify Token！")
         else:
+            import random
             search_term = random.choice(keywords_pool[category])
             st.session_state.current_keyword = search_term
             with st.spinner(f'正在搜尋庫存關鍵字「{search_term}」...'):
@@ -131,7 +132,6 @@ if st.session_state.fetched_posts:
             
             st.subheader("PTT 風格轉換結果")
             
-            # 【大修剪】極端嚴厲的 Prompt，用嚴格結構限制回文輸出
             prompt = f"""
             你是一位精通台灣 PTT 論壇文化與口碑操作的頂尖操盤手。
             請將以下提供的 Threads 原始內容，改寫成 PTT (例如 facelift 板) 的發文與回文。
