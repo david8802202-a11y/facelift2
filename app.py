@@ -1,6 +1,7 @@
 import streamlit as st
 import google.generativeai as genai
 from apify_client import ApifyClient
+import random
 
 # 1. 網頁標題與排版設定
 st.set_page_config(page_title="Threads 醫美素材精準改寫器", layout="wide")
@@ -22,15 +23,15 @@ gemini_api_key = st.sidebar.text_input("輸入 Gemini API Key", value=default_ge
 apify_token = st.sidebar.text_input("輸入 Apify API Token", value=default_apify, type="password")
 category = st.sidebar.selectbox("篩選類別", ["電波", "針劑", "診所", "閒聊"])
 
-# 3. 醫美關鍵字庫
-keywords = {
-    "電波": ["鳳凰電波", "玩美電波", "海芙音波", "索夫波"],
-    "針劑": ["玻尿酸", "肉毒", "精靈針", "洢蓮絲"],
-    "診所": ["醫美診所推薦", "醫美避雷", "醫美諮詢"],
-    "閒聊": ["容貌焦慮", "醫美保養", "術後恢復"]
+# 3. 豐富的醫美關鍵字庫（優化：改為多療程隨機挑選機制）
+keywords_pool = {
+    "電波": ["鳳凰電波", "玩美電波", "海芙音波", "索夫波", "眼周音波"],
+    "針劑": ["玻尿酸", "肉毒咀嚼肌", "精靈針", "洢蓮絲", "鼻基底玻尿酸"],
+    "診所": ["醫美診所推薦", "醫美避雷", "醫美諮詢", "台北醫美推薦"],
+    "閒聊": ["容貌焦慮", "醫美保養", "術後恢復", "失戀醫美"]
 }
 
-# 4. 呼叫 Apify 爬蟲函式
+# 4. 呼看 Apify 爬蟲函式
 def fetch_threads_via_apify(keyword, token):
     client = ApifyClient(token)
     actor_id = "watcher.data/search-threads-by-keywords"
@@ -56,16 +57,21 @@ if "fetched_posts" not in st.session_state:
 if "current_keyword" not in st.session_state:
     st.session_state.current_keyword = ""
 
-search_term = keywords[category][0]
-
-# 按鈕一：搜尋熱門清單
-if st.button(f"🔎 搜尋「{search_term}」熱門文章"):
+# 【優化】每次執行時，從字庫中隨機抽樣一個療程或主題作為本次搜尋詞
+if st.button("🔎 隨機挑選療程並搜尋 Threads"):
     if not apify_token:
         st.error("請先在左側輸入你的 Apify Token！")
     else:
-        with st.spinner(f'正在前往 Threads 撈取最新的 {search_term} 討論池...'):
+        # 隨機選擇該類別下的一個特定療程
+        search_term = random.choice(keywords_pool[category])
+        st.session_state.current_keyword = search_term
+        
+        with st.spinner(f'正在隨機選定主題「{search_term}」並前往 Threads 撈取讨论池...'):
             st.session_state.fetched_posts = fetch_threads_via_apify(search_term, apify_token)
-            st.session_state.current_keyword = search_term
+
+# 顯示當前鎖定的隨機關鍵字
+if st.session_state.current_keyword:
+    st.info(f"當前搜尋主題：**{st.session_state.current_keyword}**")
 
 # 6. 顯示自選清單與 AI 精準改寫
 if st.session_state.fetched_posts:
@@ -114,9 +120,10 @@ if st.session_state.fetched_posts:
             4. 標題格式：根據你挑選的情境，自動加上分類標籤（例：[問題]、[討論]、[心得]、[閒聊]）。
             
             5. 【嚴格執行的 PTT 回文格式規範（必須與參考檔案完全一致）】：
-               在文章最下方，請模擬生成 5 條高質量回文。
+               在文章最下方，請模擬生成 10 條高質量回文。
                
                【格式死命令】：
+               - 必須精準生成 10 則回文，不能多也不能少。
                - 絕對不允許出現任何使用者帳號、ID（例如禁止出現 user123）。
                - 絕對不允許出現任何冒號（:）或引號。
                - 絕對不允許出現任何日期與時間（例如禁止出現 05/14 18:23）。
@@ -134,7 +141,7 @@ if st.session_state.fetched_posts:
                真的還是要看醫生技術，一堆業務只想拉客
             """
             
-            with st.spinner('Gemini 正在為你生成最道地的 PTT 文章與推文...'):
+            with st.spinner('Gemini 正在為你生成最道地的 PTT 文章與 10 則推文...'):
                 try:
                     response = model.generate_content(prompt)
                     st.markdown(response.text)
