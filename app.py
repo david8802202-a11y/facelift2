@@ -9,11 +9,9 @@ st.title("Threads 醫美素材自選與 PTT 鄉民風格改寫器")
 # 2. 側邊欄設定區（安全讀取 Secrets 變數）
 st.sidebar.header("操作設定")
 
-# 預設值為空字串
 default_gemini = ""
 default_apify = ""
 
-# 【超強防呆】嘗試讀取 Secrets，如果失敗就略過，絕對不讓網頁崩潰
 if "GEMINI_API_KEY" in st.secrets:
     default_gemini = st.secrets["GEMINI_API_KEY"]
 if "APIFY_TOKEN" in st.secrets:
@@ -22,7 +20,6 @@ if "APIFY_TOKEN" in st.secrets:
 gemini_api_key = st.sidebar.text_input("輸入 Gemini API Key", value=default_gemini, type="password")
 apify_token = st.sidebar.text_input("輸入 Apify API Token", value=default_apify, type="password")
 
-# 安全抓取 Apify 餘額
 if apify_token:
     try:
         client = ApifyClient(apify_token)
@@ -132,6 +129,7 @@ if st.session_state.fetched_posts:
             
             st.subheader("PTT 風格轉換結果")
             
+            # 【再度優化】強制要求回文中間必須使用雙換行，用範例卡死格式
             prompt = f"""
             你是一位精通台灣 PTT 論壇文化與口碑操作的頂尖操盤手。
             請將以下提供的 Threads 原始內容，改寫成 PTT (例如 facelift 板) 的發文與回文。
@@ -145,31 +143,43 @@ if st.session_state.fetched_posts:
             3. 標題格式：自動加上 [問題]、[討論]、[心得]、[閒聊] 之一的分類標籤。
             
             【回文輸出死命令（不准有任何例外）】：
-            請在文章最下方，精準輸出 10 則模擬回文。
+            請在發文結束後，留下三個空白行，再精準輸出 10 則模擬回文。
             我不管你對 PTT 的預設印象是什麼，回文格式「必須且只能」完全符合下方的要求。
             
             1. 絕對禁止出現任何使用者 ID（例如禁止出現 user123、hater456）。
             2. 絕對禁止出現任何英文冒號（:）。
             3. 絕對禁止出現任何日期與時間（例如禁止出現 05/14 18:23）。
             4. 絕對禁止出現任何噓文。
-            5. 每則回文各自獨立一行。開頭只能是「推|」或「直接是純文字內容」。
+            5. 【最重要】每則回文必須「各自獨立成行」，且「每則回文與下一則回文之間，必須留有一行空白行（雙換行）」。不准擠在同一行！
             
-            請完全參照以下 10 則輸出格式樣本作改寫（字數短、口語化）：
+            請嚴格參照以下 10 則輸出範本（每行中間都有空行，開頭只能是「推|」或直接純文字）：
+            
             推|原PO拍拍
+            
             這家水很深根本強推銷
+            
             推|之前去諮詢也這樣，聽完超有壓力
+            
             推|卡位等熱心大大分享心得
+            
             真的還是要看醫生技術，一堆業務只想拉客
+            
             推|打完肉毒真的咀嚼無力一陣子
+            
             吃大腸包小腸咬不動笑死
+            
             推|這家避雷+1 諮詢師臉超臭
+            
             推|眼周音波真的比較少人討論
+            
             想知道完整療程次數診所都不先說
             """
             
             with st.spinner('Gemini 正在為你生成最道地的 PTT 文章與 10 則推文...'):
                 try:
                     response = model.generate_content(prompt)
-                    st.markdown(response.text)
+                    # 透過 Python 的 replace 確保所有的換行符號都能在 Streamlit 上正確轉譯為網頁換行
+                    final_text = response.text.replace("\n", "\n\n")
+                    st.markdown(final_text)
                 except Exception as e:
                     st.error(f"AI 生成失敗：{e}")
