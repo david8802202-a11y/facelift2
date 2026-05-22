@@ -7,7 +7,7 @@ import random
 st.set_page_config(page_title="Threads 醫美素材精準改寫器", layout="wide")
 st.title("Threads 醫美素材自選與 PTT 鄉民風格改寫器")
 
-# 2. 側邊欄設定區（支援自動記憶金鑰與額度顯示）
+# 2. 側邊欄設定區（支援自動記憶金鑰與安全額度顯示）
 st.sidebar.header("操作設定")
 
 default_gemini = ""
@@ -22,21 +22,20 @@ except Exception:
 gemini_api_key = st.sidebar.text_input("輸入 Gemini API Key", value=default_gemini, type="password")
 apify_token = st.sidebar.text_input("輸入 Apify API Token", value=default_apify, type="password")
 
-# 顯示 Apify 當月額度使用狀況
+# 【優化】安全抓取額度：如果權限不夠或失敗，直接略過，不跳錯誤擋路
 if apify_token:
     try:
         client = ApifyClient(apify_token)
         account_info = client.account().get()
-        # 抓取當月剩餘額度 (美金)
-        current_month_usage = account_info.get("currentMonthUsageUsd", 0)
-        # 免費帳號通常是 5 美金上限
-        st.sidebar.metric(label="本月已用 Apify 額度", value=f"${current_month_usage:.3f} / $5.000")
+        if account_info and "currentMonthUsageUsd" in account_info:
+            current_month_usage = account_info["currentMonthUsageUsd"]
+            st.sidebar.metric(label="本月已用 Apify 額度", value=f"${current_month_usage:.3f} / $5.000")
     except Exception:
-        st.sidebar.warning("無法取得 Apify 額度資訊，請檢查 Token 是否正確。")
+        pass # 抓不到就安靜略過
 
 category = st.sidebar.selectbox("篩選類別", ["電波", "針劑", "診所", "閒聊"])
 
-# 3. 更新後的醫美關鍵字庫
+# 3. 醫美關鍵字庫
 keywords_pool = {
     "電波": ["音波", "電波"],
     "針劑": ["玻尿酸", "肉毒", "精靈針", "洢蓮絲", "鼻基底玻尿酸", "逆時針"],
@@ -100,7 +99,6 @@ with col2:
             with st.spinner(f'正在精準搜尋自訂話題「{custom_input}」...'):
                 st.session_state.fetched_posts = fetch_threads_via_apify(custom_input, apify_token)
 
-# 顯示當前鎖定的搜尋字詞
 if st.session_state.current_keyword:
     st.info(f"當前鎖定主題：**{st.session_state.current_keyword}**")
 
@@ -121,11 +119,9 @@ if st.session_state.fetched_posts:
     
     chosen_post = st.session_state.fetched_posts[selected_index]
     content = chosen_post.get('text', chosen_post.get('caption', '無文字內容'))
-    url = chosen_post.get('url', '')
     
     st.info(f"**💡 你已選定素材：** {content}")
     
-    # 按鈕：四大情境與真實推文格式改寫
     if st.button("🔥 開始將所選文章改寫為 PTT 格式"):
         if not gemini_api_key:
             st.error("請填寫 Gemini API Key！")
@@ -135,43 +131,40 @@ if st.session_state.fetched_posts:
             
             st.subheader("PTT 風格轉換結果")
             
+            # 【大修剪】極端嚴厲的 Prompt，用嚴格結構限制回文輸出
             prompt = f"""
-            你是一位精通台灣 PTT 論壇（如 facelift、BeautySalon 板）文化與口碑操作的頂尖操盤手。
-            請根據以下提供的 Threads 原始內容，先判斷其屬於哪一種「情境分類」，並嚴格模仿該分類的 PTT 真人發文與回文精髓進行重寫。
+            你是一位精通台灣 PTT 論壇文化與口碑操作的頂尖操盤手。
+            請將以下提供的 Threads 原始內容，改寫成 PTT (例如 facelift 板) 的發文與回文。
             
             【Threads 原始內容】：
             {content}
             
-            【行銷操盤手必須死守的 PTT 真人寫作規範】：
-            1. 視覺高碎裂感（最重要）：每句話絕對不能過長（大約 15 個字內），只要講完一個短句就必須「強制斷行」。段落與段落之間必須留下一條完整的「空白行」。禁止出現任何長篇大論的文字方塊！
-            2. 語氣與禁忌：徹底清除所有 Emoji（如 😂, ✨, 🥺）。絕對不能出現年份字眼。
-            3. 情境分類與對應語氣（請自行判斷套用）：
-               - A.【問題/詢問類】：外貌焦慮、特定生理困擾起手。內文必須帶有「爬過文了、諮詢過但猶豫、怕被強推銷、求救QQ」的人設。
-               - B.【術後心得/體感類】：著重在「極其細微的生理體感描繪」（如：吃東西臉超酸、大腸包小腸咬不動、一邊臉腫起來、擔心假體破掉）。語氣優缺點並陳、碎碎念。
-               - C.【避雷/抱怨/吐槽類】：起手式為「在其他平台看到八卦、身邊朋友踩雷、去諮詢發現診所都不講清楚」。語氣要帶點忿忿不平與酸度。
-               - D.【社會觀察/閒聊類】：以第三人稱視角切入（如：感嘆妹子失戀背債大整型、朋友當醫美業務後變得很像直銷瘋狂拉客）。語氣帶有吃瓜群眾感。
-            4. 標題格式：根據你挑選的情境，自動加上分類標籤（例：[問題]、[討論]、[心得]、[閒聊]）。
+            【發文排版死命令】：
+            1. 視覺高碎裂感：每句話不能過長（大約 15 字內），講完一個短句就必須「強制斷行」。段落之間必須留一條完整的「空白行」。禁止出現長篇大論的文字方塊！
+            2. 語氣：模仿真人先碎碎念交代情境再切入主題。清除所有 Emoji、清除任何年份字眼。
+            3. 標題格式：自動加上 [問題]、[討論]、[心得]、[閒聊] 之一的分類標籤。
             
-            5. 【嚴格執行的 PTT 回文格式規範（必須與參考檔案完全一致）】：
-               在文章最下方，請模擬生成 10 條高質量回文。
-               
-               【格式死命令】：
-               - 必須精準生成 10 則回文，不能多也不能少。
-               - 絕對不允許出現任何使用者帳號、ID（例如禁止出現 user123）。
-               - 絕對不允許出現任何冒號（:）或引號。
-               - 絕對不允許出現任何日期與時間（例如禁止出現 05/14 18:23）。
-               - 絕對不允許出現任何噓文。
-               
-               請交替使用以下兩種真實檔案格式輸出（每條回文獨立一行）：
-               格式一：以「推|」開頭，後面直接接回文內容。
-               格式二：沒有任何開頭標籤，直接輸出純回文內容（模擬長推文被拆行的效果）。
-               
-               【回文範例樣式】：
-               推|原PO拍拍
-               這家水很深根本強推銷
-               推|之前去諮詢也這樣，聽完超有壓力
-               推|卡位等熱心大大分享心得
-               真的還是要看醫生技術，一堆業務只想拉客
+            【回文輸出死命令（不准有任何例外）】：
+            請在文章最下方，精準輸出 10 則模擬回文。
+            我不管你對 PTT 的預設印象是什麼，回文格式「必須且只能」完全符合下方的要求。
+            
+            1. 絕對禁止出現任何使用者 ID（例如禁止出現 user123、hater456）。
+            2. 絕對禁止出現任何英文冒號（:）。
+            3. 絕對禁止出現任何日期與時間（例如禁止出現 05/14 18:23）。
+            4. 絕對禁止出現任何噓文。
+            5. 每則回文各自獨立一行。開頭只能是「推|」或「直接是純文字內容」。
+            
+            請完全參照以下 10 則輸出格式樣本作改寫（字數短、口語化）：
+            推|原PO拍拍
+            這家水很深根本強推銷
+            推|之前去諮詢也這樣，聽完超有壓力
+            推|卡位等熱心大大分享心得
+            真的還是要看醫生技術，一堆業務只想拉客
+            推|打完肉毒真的咀嚼無力一陣子
+            吃大腸包小腸咬不動笑死
+            推|這家避雷+1 諮詢師臉超臭
+            推|眼周音波真的比較少人討論
+            想知道完整療程次數診所都不先說
             """
             
             with st.spinner('Gemini 正在為你生成最道地的 PTT 文章與 10 則推文...'):
